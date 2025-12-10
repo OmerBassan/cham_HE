@@ -1,0 +1,47 @@
+# Chameleon: LLM Robustness Benchmark Framework
+# Docker Compose configuration for easy deployment
+#
+# Usage:
+#   docker-compose build
+#   docker-compose run chameleon python cli.py init
+#   docker-compose run chameleon python cli.py distort -p MyProject
+#   docker-compose run chameleon python cli.py evaluate -p MyProject
+#   docker-compose run chameleon python cli.py analyze -p MyProject
+
+version: '3.8'
+
+services:
+  chameleon:
+    build: .
+    image: chameleon:latest
+    container_name: chameleon
+    
+    # Mount projects directory for persistence
+    volumes:
+      - ./Projects:/app/Projects
+    
+    # API keys from environment or .env file
+    environment:
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    
+    # Interactive mode
+    stdin_open: true
+    tty: true
+    
+    # Default command
+    command: ["python", "cli.py", "--help"]
+
+  # Alternative: Run analysis only (no API keys needed)
+  analyze:
+    build: .
+    image: chameleon:latest
+    volumes:
+      - ./Projects:/app/Projects
+    command: ["python", "cli.py", "analyze", "-p", "${PROJECT:-MyProject}"]
+
+# Networks
+networks:
+  default:
+    name: chameleon-network
+

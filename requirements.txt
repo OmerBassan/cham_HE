@@ -1,0 +1,57 @@
+# Chameleon Framework - Dependencies
+# Install with: pip install -r requirements.txt
+
+# ============================================
+# Core Dependencies
+# ============================================
+pandas>=2.0.0
+numpy>=1.24.0
+pyyaml>=6.0
+scipy>=1.10.0
+
+# ============================================
+# Analysis and Visualization
+# ============================================
+matplotlib>=3.7.0
+seaborn>=0.12.0
+statsmodels>=0.14.0
+scikit-learn>=1.3.0  # TF-IDF clustering for error analysis
+
+# ============================================
+# API Clients
+# ============================================
+# OpenAI (for target model evaluation)
+openai>=1.0.0
+httpx>=0.25.0
+
+# Mistral (for distortion generation)
+mistralai>=1.0.0
+
+# Anthropic (optional - for Claude evaluation)
+# anthropic>=0.18.0
+
+# ============================================
+# Async & HTTP
+# ============================================
+aiohttp>=3.9.0
+requests>=2.31.0
+
+# ============================================
+# Environment & Utilities
+# ============================================
+python-dotenv>=1.0.0
+tqdm>=4.65.0
+psutil>=5.9.0
+
+# ============================================
+# Data Processing
+# ============================================
+openpyxl>=3.1.0  # Excel file support
+
+# ============================================
+# Development (optional)
+# ============================================
+# pytest>=7.0.0
+# black>=23.0.0
+# ruff>=0.1.0
+# mypy>=1.0.0
