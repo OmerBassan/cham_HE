@@ -244,7 +244,7 @@ class DistortionRunner:
         Create the preliminary distortions CSV from original data files.
         
         For HumanEval-style datasets, each row corresponds to a single task,
-        where 'question_text' contains the prompt (code stub + description)
+        where 'question_text' contains the prompt (code stub + description/docstring)
         that will be paraphrased. For legacy multiple-choice datasets, the
         original semantics are preserved.
         
@@ -273,7 +273,15 @@ class DistortionRunner:
         jsonl_files = list(original_dir.glob("*.jsonl"))
         
         if not csv_files and not jsonl_files:
-            raise FileNotFoundError(f"No CSV or JSONL files found in {original_dir}")
+            # Fallback: Check global data folder
+            global_data_dir = self.config.project_dir.parent.parent / "data"
+            if global_data_dir.exists():
+                print(f"   ⚠️ No local data found. Checking global folder: {global_data_dir}")
+                csv_files = list(global_data_dir.glob("*.csv"))
+                jsonl_files = list(global_data_dir.glob("*.jsonl"))
+
+        if not csv_files and not jsonl_files:
+            raise FileNotFoundError(f"No CSV or JSONL files found in {original_dir} or {global_data_dir}")
         
         # --- LEGACY CSV PATH (multiple-choice style) ---
         if csv_files:
@@ -601,6 +609,7 @@ class DistortionRunner:
     def _run_post_validation(self):
         """
         Post-distortion validation:
+        0. Static validator (template + quality rules via validate_distortion)
         1. Check for encoding errors (garbage characters)
         2. Check for exact duplicates
         3. Check for near-duplicates (>95% word overlap between distortions)
@@ -619,6 +628,17 @@ class DistortionRunner:
         
         while True:
             validation_round += 1
+
+            # Step 0: Static validator (syntax/template/quality)
+            print(f"\n   📋 Step 0: Static validator checks (template + quality rules)...")
+            static_invalid = self._find_validator_invalid_distortions()
+            if static_invalid:
+                total_static = sum(len(qs) for qs in static_invalid.values())
+                print(f"      ⚠️ Found {total_static} questions with invalid distortions")
+                cleared_static = self._clear_duplicate_slots(static_invalid)
+                print(f"      🗑️ Cleared {cleared_static} invalid slots (will be regenerated)")
+            else:
+                print(f"      ✅ All current distortions pass static validator")
             
             # Step 1: Check for encoding errors (garbage characters)
             print(f"\n   📋 Step 1: Checking for encoding errors...")
@@ -861,6 +881,50 @@ class DistortionRunner:
                 near_dups[miu] = questions_with_near_dups
         
         return near_dups
+
+    def _find_validator_invalid_distortions(self) -> Dict[float, List[Dict]]:
+        """
+        Use validate_distortion() to find slots whose text violates our
+        structural/quality rules (including HumanEval template preservation).
+
+        Returns dict of miu -> list of questions, in the same shape used by
+        _find_duplicate_distortions / _find_near_duplicate_distortions, so that
+        _clear_duplicate_slots can clear and reset them for regeneration.
+        """
+        invalid: Dict[float, List[Dict]] = {}
+
+        for miu in [m for m in self._df['miu'].unique() if m > 0]:
+            miu_df = self._df[self._df['miu'] == miu]
+            questions_with_invalid: List[Dict] = []
+
+            for q_id, group in miu_df.groupby('question_id'):
+                original = group['question_text'].iloc[0]
+                distortions = group['distorted_question'].tolist()
+
+                bad_indices: List[int] = []
+                for i, d in enumerate(distortions):
+                    if pd.isna(d) or not d:
+                        continue
+                    res = validate_distortion(str(original), str(d), miu)
+                    if not res.is_valid:
+                        bad_indices.append(i)
+
+                if bad_indices:
+                    questions_with_invalid.append({
+                        "id": q_id,
+                        "text": original,
+                        "duplicate_indices": bad_indices,
+                        "existing": [
+                            d for i, d in enumerate(distortions)
+                            if pd.notna(d) and d and i not in bad_indices
+                        ],
+                        "needed": len(bad_indices),
+                    })
+
+            if questions_with_invalid:
+                invalid[miu] = questions_with_invalid
+
+        return invalid
     
     def _mistral_judge_validation(self, sample_per_miu: int = 0) -> Dict[float, List[Dict]]:
         """
@@ -964,6 +1028,8 @@ class DistortionRunner:
         
         try:
             # Upload and submit batch
+            from mistralai import Mistral  # re-import to satisfy type checkers in some environments
+            client = Mistral(api_key=self.config.api_key)
             with open(jsonl_path, "rb") as f:
                 uploaded = client.files.upload(
                     file={"file_name": jsonl_path.name, "content": f.read()},
@@ -1057,7 +1123,7 @@ class DistortionRunner:
                             mask = (self._df['question_id'] == q_id) & (self._df['miu'] == miu)
                             self._df.loc[mask, 'llm_validated'] = True
                             validated_count += 1
-                    except:
+                    except Exception:
                         continue
             
             # Report findings
@@ -1090,62 +1156,66 @@ class DistortionRunner:
                 distortion_entries.append(f"[D{i+1}]: {d}")
         
         distortion_block = "\n".join(distortion_entries)
-        
-        return f"""DISTORTION QUALITY CONTROL
-==========================
 
-ORIGINAL HUMANEVAL PROMPT:
-"{original}"
+        lines = [
+            "DISTORTION QUALITY CONTROL",
+            "==========================",
+            "",
+            "ORIGINAL HUMANEVAL PROMPT:",
+            original,
+            "",
+            f"MIU LEVEL: μ = {miu}",
+            f"MIU RULE: {rule}",
+            "",
+            "IMPORTANT:",
+            "- The underlying HumanEval task (input/output behavior) must remain identical.",
+            "- Python code (function signatures, argument names, literals, tests) must NOT be changed.",
+            "- Only natural-language description, comments, or docstrings may be rephrased.",
+            "",
+            f"ALL {N} DISTORTIONS (for this prompt at μ={miu}):",
+            distortion_block,
+            "",
+            "TASK: Evaluate EACH distortion [D1] to [D{N}] by comparing it against:",
+            "1. The ORIGINAL prompt",
+            f"2. The OTHER {N-1} distortions in this set",
+            "",
+            "VALIDATION CHECKLIST FOR EACH DISTORTION:",
+            "",
+            "□ ENCODING/CHARACTER ERRORS?",
+            "  ⚠️ CRITICAL: Look for garbage like: â€™ â€\" â€œ Ã© Ã¨ Â° etc.",
+            "  - These are encoding errors and MUST be flagged as BAD",
+            "  - Normal apostrophes (') and quotes (\") are OK",
+            "",
+            "□ MEANING PRESERVED?",
+            "  - Does this distortion still describe the same task as the original?",
+            "  - Would the same tests and reference solution still be valid here?",
+            "",
+            "□ PYTHON CODE PRESERVED?",
+            "  - Function name, parameters, and any provided code snippets are unchanged",
+            "  - No new code is added that changes behavior",
+            "  - No literal values or tests are modified",
+            "",
+            f"□ FOLLOWS μ={miu} RULE?",
+            f"  - Rule: \"{rule}\"",
+            "  - Is the distortion intensity appropriate for this miu level?",
+            "",
+            f"□ DIFFERENT FROM OTHER {N-1} DISTORTIONS?",
+            "  - Compare this distortion to all others in the list",
+            "  - Is it meaningfully different? (not just 1–2 words changed)",
+            "  - Would someone consider these truly distinct variations?",
+            "",
+            "□ QUALITY OK?",
+            "  - No truncation, nonsense, or broken text?",
+            "  - Grammatically correct and readable?",
+            "",
+            "RESPOND WITH EXACTLY ONE OF:",
+            "• \"ALL_VALID\" if every distortion passes ALL checks",
+            "• \"BAD: X, Y\" listing ONLY the numbers that FAIL (e.g., \"BAD: 2, 5, 8\")",
+            "",
+            "Verdict:",
+        ]
 
-MIU LEVEL: μ = {miu}
-MIU RULE: {rule}
-
-IMPORTANT:
-- The underlying HumanEval task (input/output behavior) must remain identical.
-- Python code (function signatures, argument names, literals, tests) must NOT be changed.
-- Only natural-language description, comments, or docstrings may be rephrased.
-
-ALL {N} DISTORTIONS (for this prompt at μ={miu}):
-{distortion_block}
-
-TASK: Evaluate EACH distortion [D1] to [D{N}] by comparing it against:
-1. The ORIGINAL prompt
-2. The OTHER {N-1} distortions in this set
-
-VALIDATION CHECKLIST FOR EACH DISTORTION:
-
-□ ENCODING/CHARACTER ERRORS?
-  ⚠️ CRITICAL: Look for garbage like: â€™ â€" â€œ Ã© Ã¨ Â° etc.
-  - These are encoding errors and MUST be flagged as BAD
-  - Normal apostrophes (') and quotes (") are OK
-
-□ MEANING PRESERVED?
-  - Does this distortion still describe the same task as the original?
-  - Would the same tests and reference solution still be valid here?
-
-□ PYTHON CODE PRESERVED?
-  - Function name, parameters, and any provided code snippets are unchanged
-  - No new code is added that changes behavior
-  - No literal values or tests are modified
-
-□ FOLLOWS μ={miu} RULE?
-  - Rule: "{rule}"
-  - Is the distortion intensity appropriate for this miu level?
-
-□ DIFFERENT FROM OTHER {N-1} DISTORTIONS?
-  - Compare this distortion to all others in the list
-  - Is it meaningfully different? (not just 1-2 words changed)
-  - Would someone consider these truly distinct variations?
-
-□ QUALITY OK?
-  - No truncation, nonsense, or broken text?
-  - Grammatically correct and readable?
-
-RESPOND WITH EXACTLY ONE OF:
-• "ALL_VALID" if every distortion passes ALL checks
-• "BAD: X, Y" listing ONLY the numbers that FAIL (e.g., "BAD: 2, 5, 8")
-
-Verdict:"""
+        return "\n".join(lines)
     
     def _parse_judge_response(self, response: str, n_distortions: int) -> List[int]:
         """Parse the judge response to extract bad distortion indices."""
@@ -1164,7 +1234,7 @@ Verdict:"""
                 num = int(num_str)
                 if 1 <= num <= n_distortions:
                     bad_indices.append(num - 1)  # Convert to 0-indexed
-            except:
+            except Exception:
                 continue
         
         return bad_indices
@@ -1394,7 +1464,7 @@ Verdict:"""
                             if part.startswith('needed'):
                                 try:
                                     needed = int(part.replace('needed', ''))
-                                except:
+                                except Exception:
                                     pass
                         
                         content = data.get('response', {}).get('body', {}).get('choices', [{}])[0].get('message', {}).get('content', '')
@@ -1723,7 +1793,7 @@ Verdict:"""
         # Final check
         incomplete = self._count_incomplete()
         
-        # Run post-validation to check for duplicates
+        # Run post-validation to check for duplicates / template validity
         self._run_post_validation()
         
         # Final save and cleanup

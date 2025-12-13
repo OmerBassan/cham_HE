@@ -8,3 +8,4 @@ if ($LASTEXITCODE -eq 0) {
 } else {
     Write-Host "❌ Workflow Failed!" -ForegroundColor Red
 }
+

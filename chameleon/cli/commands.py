@@ -1243,11 +1243,11 @@ def cmd_distort(args):
     try:
         # Check for data
         original_data_dir = project_path / "original_data"
-        data_files = list(original_data_dir.glob("*.csv"))
+        data_files = list(original_data_dir.glob("*.jsonl"))
         
         if not data_files:
             print(f"\n❌ No data files found in {original_data_dir}")
-            print(f"   Run file upload first or copy CSV files manually.")
+            print(f"   Run file upload first or copy JSONL files manually.")
             return 1
         
         print(f"\n📁 Data files found: {len(data_files)}")
@@ -1380,6 +1380,26 @@ def cmd_evaluate(args):
     try:
         from chameleon.evaluation import run_evaluation
         
+        # Check if generation is needed
+        samples_path = project_path / "samples.jsonl"
+        if not samples_path.exists():
+            print("\n⚠️  No generated samples found. Starting generation phase first...")
+            from chameleon.workflow import run_workflow
+            
+            # Run ONLY generation stage
+            gen_result = run_workflow(
+                project_name, 
+                str(projects_dir),
+                skip_distortion=True,
+                skip_evaluation=True,  # We will run evaluation separately below
+                skip_analysis=True
+            )
+            
+            if gen_result.get("status") != "success":
+                print("\n❌ Generation failed. Cannot proceed to evaluation.")
+                return 1
+            print("\n✅ Generation complete. Proceeding to evaluation...")
+
         result = run_evaluation(project_name, str(projects_dir))
         
         return 0 if result.get("status") == "complete" else 1

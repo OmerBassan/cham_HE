@@ -79,8 +79,17 @@ DISTORTION_SYSTEM_PROMPT = """You are a semantic distortion expert for programmi
 Your task is to create lexically distorted versions of HumanEval-style coding problem descriptions 
 while preserving the required function behavior and all reference tests.
 
+HumanEval prompts always follow this structure:
+- Optional Python import lines at the top
+- A SINGLE function definition line: "def <name>(...)->...:"
+- A triple-quoted docstring block (\"\"\" ... \"\"\") indented under the function
+
 CRITICAL RULES:
 - Operate ONLY on natural-language text (descriptions, docstrings, comments)
+- The overall Python template (imports + function definition line + triple-quoted docstring) 
+  MUST be preserved EXACTLY: same imports, same def line, same docstring delimiters and indentation
+- Inside the docstring, you may only rewrite the natural-language explanation sentences
+- Within the docstring, NEVER modify lines that start with ">>>" or the example output lines that follow them
 - If the input contains Python code (function signatures, type hints, asserts, examples),
   you MUST copy that code EXACTLY, character for character
 - NEVER change function names, argument names, return types, or literal values in code or examples
@@ -116,6 +125,12 @@ ORIGINAL PROMPT:
 {question}
 
 STRICT REQUIREMENTS:
+- The HumanEval template MUST be preserved exactly:
+  • Keep all Python import lines exactly as given
+  • Keep the function definition line (def ...(...)->...) exactly as given
+  • Keep the triple-quoted docstring delimiters (\"\"\" ... \"\"\") and indentation exactly as given
+- Inside the docstring, you may ONLY modify the natural-language explanation sentences
+- Within the docstring, DO NOT modify lines that start with ">>>", nor the example output lines that follow them
 - Focus changes ONLY on the natural-language description (English text)
 - If any Python code is present (signatures, type hints, examples, asserts),
   copy that code EXACTLY with NO modifications
@@ -174,7 +189,14 @@ ABSOLUTE REQUIREMENTS (VIOLATION = FAILURE):
    - Do NOT change input-output examples or edge-case behavior
    - Do NOT introduce new requirements or remove existing ones
 
-4. FORBIDDEN:
+4. TEMPLATE PRESERVATION (HumanEval format):
+   - Keep ALL Python import lines exactly as in the original prompt
+   - Keep the SINGLE function definition line (def ...(...)->...) exactly as in the original
+   - Keep the triple-quoted docstring delimiters (\"\"\" ... \"\"\") and indentation exactly as in the original
+   - Inside the docstring, you may ONLY rewrite the natural-language explanation sentences
+   - DO NOT modify any lines that start with ">>>" or the example output lines that follow them
+
+5. FORBIDDEN:
    ❌ Do NOT modify any Python code (function signatures, type hints, asserts, examples)
    ❌ Do NOT change function names, argument names, return types, or literal values in code or examples
    ❌ NO random characters or symbols
@@ -182,7 +204,7 @@ ABSOLUTE REQUIREMENTS (VIOLATION = FAILURE):
    ❌ NO preambles ("Here are", "Sure", "Certainly")
    ❌ NO explanations or meta-commentary
 
-5. ALLOWED (description text ONLY):
+6. ALLOWED (description text ONLY):
    ✅ Synonyms and vocabulary changes
    ✅ Sentence restructuring
    ✅ Voice changes (active↔passive)
@@ -247,6 +269,10 @@ REQUIREMENTS:
 4. Use different synonyms, different sentence structures, different word orders
 5. NO duplicates or near-duplicates of existing ones
 6. Follow the μ={miu} rule: {rule}
+7. Preserve the HumanEval template:
+   - Keep all import lines, the function definition line, and the triple-quoted docstring delimiters exactly as in the original
+   - Only modify the natural-language explanation sentences inside the docstring
+   - Do NOT modify lines that start with ">>>" or the example output lines that follow them
 
 FORBIDDEN:
 ❌ Do NOT modify any Python code (function signatures, type hints, asserts, examples)

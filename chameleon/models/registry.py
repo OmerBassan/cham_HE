@@ -60,6 +60,13 @@ def _load_backend(backend_name: str) -> None:
             from chameleon.models.openai_backend import OpenAIBackend
             register_backend("openai", OpenAIBackend)
         
+        elif backend_name == "mistral":
+            # Mistral API is OpenAI compatible, so we can reuse the backend
+            # or we could make a dedicated one if needed.
+            # Ideally we check for mistralai library presence too.
+            from chameleon.models.openai_backend import OpenAIBackend
+            register_backend("mistral", OpenAIBackend)
+        
         elif backend_name == "anthropic":
             from chameleon.models.anthropic_backend import AnthropicBackend
             register_backend("anthropic", AnthropicBackend)

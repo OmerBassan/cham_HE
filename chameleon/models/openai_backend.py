@@ -14,6 +14,11 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any, Iterator
 from datetime import datetime
 
+try:
+    import openai
+except ImportError:
+    openai = None
+
 from chameleon.models.base import (
     ModelBackend, 
     BatchRequest, 
@@ -46,6 +51,7 @@ class OpenAIBackend(ModelBackend):
         
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         self.organization = organization or os.getenv("OPENAI_ORG_ID")
+        self.kwargs = kwargs
         self._client = None
     
     @property
@@ -56,14 +62,19 @@ class OpenAIBackend(ModelBackend):
     def client(self):
         """Lazy load OpenAI client."""
         if self._client is None:
-            try:
-                import openai
-                self._client = openai.OpenAI(
-                    api_key=self.api_key,
-                    organization=self.organization
-                )
-            except ImportError:
+            if openai is None:
                 raise ImportError("OpenAI package not installed. Run: pip install openai")
+            
+            # Support custom base URL (e.g. for Mistral API via OpenAI compatibility)
+            base_url = self.kwargs.get('api_base_url')
+            if not base_url and 'mistral' in self.kwargs.get('vendor', '').lower():
+                    base_url = "https://api.mistral.ai/v1"
+
+            self._client = openai.OpenAI(
+                api_key=self.api_key,
+                organization=self.organization,
+                base_url=base_url
+            )
         return self._client
     
     def is_available(self) -> bool:

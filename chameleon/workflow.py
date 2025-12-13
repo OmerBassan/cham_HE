@@ -25,6 +25,7 @@ import tqdm
 
 from chameleon.distortion.constants import DEFAULT_MIU_VALUES, DEFAULT_DISTORTIONS_PER_QUESTION
 from chameleon.distortion.runner import DistortionRunner
+from chameleon.distortion.validator import reconstruct_humaneval_prompt
 from chameleon.evaluation.batch_processor import BatchProcessor, EvaluationConfig
 from chameleon.models.registry import get_backend, BackendType
 from chameleon.core.schemas import BackendType as EnumBackendType
@@ -224,7 +225,11 @@ class ChameleonWorkflow:
         
         # Prepare backend
         try:
-            backend_type = getattr(EnumBackendType, self.config.target_vendor.upper())
+            # Map mistral to openai backend for compatibility
+            if self.config.target_vendor.lower() == 'mistral':
+                backend_type = getattr(EnumBackendType, 'OPENAI')
+            else:
+                backend_type = getattr(EnumBackendType, self.config.target_vendor.upper())
         except AttributeError:
             # Fallback for known vendors if not in Enum
             if self.config.target_vendor.lower() == "openai":
@@ -237,7 +242,8 @@ class ChameleonWorkflow:
         backend = get_backend(
             backend_type=backend_type,
             model_name=self.config.target_model,
-            api_key=self.config.target_api_key
+            api_key=self.config.target_api_key,
+            vendor=self.config.target_vendor
         )
         
         if not backend.is_available():
@@ -262,9 +268,14 @@ class ChameleonWorkflow:
             if not q_text or not d_id:
                 continue
                 
+            # Reconstruct prompt if needed (fix for missing signature/imports)
+            # This handles cases where distortion only contains the description
+            original_prompt = row.get('question_text', '')
+            final_prompt = reconstruct_humaneval_prompt(str(original_prompt), str(q_text))
+            
             tasks_to_run.append({
                 "distortion_id": str(d_id),
-                "prompt": str(q_text),
+                "prompt": final_prompt,
                 "row_idx": idx
             })
             
@@ -290,14 +301,31 @@ class ChameleonWorkflow:
             
         # Run generation (Parallel)
         results = []
-        max_workers = 10 if self.config.target_vendor == "openai" else 1
+        max_workers = 10 if self.config.target_vendor == "openai" else 2
         
         print(f"Starting generation with {max_workers} threads...")
         
         with open(self.samples_jsonl, 'a', encoding='utf-8') as f_out:
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Strict system prompt to ensure code-only output
+                system_prompt = (
+                    "You are an automated Python code completion engine. Your goal is to complete the provided function body based on its signature and docstring.\n\n"
+                    "STRICT OUTPUT RULES:\n"
+                    "1. Raw Code Only: Return only the valid Python code required to complete the function.\n"
+                    "2. No Markdown: Do NOT use markdown blocks (```python), backticks, or any formatting.\n"
+                    "3. No Chatter: Do NOT include conversational text (e.g., 'Here is the code', 'I have completed...'), explanations, or comments.\n"
+                    "4. No Repetition: Do not repeat the function signature unless necessary contextually.\n\n"
+                    "Your output will be executed directly. Any non-code text will cause the execution to fail."
+                )
+
                 future_to_task = {
-                    executor.submit(backend.complete, prompt=t["prompt"], max_tokens=1024, temperature=0.2): t 
+                    executor.submit(
+                        backend.complete, 
+                        prompt=t["prompt"], 
+                        system_prompt=system_prompt,
+                        max_tokens=1024, 
+                        temperature=0.2
+                    ): t 
                     for t in tasks_to_run
                 }
                 

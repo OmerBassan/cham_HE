@@ -31,7 +31,7 @@ from dotenv import load_dotenv
 # ====== CONFIGURABLE INPUT PATH ======
 # Set this to the path of your HumanEval-style samples JSONL file.
 # Each line should contain at least: {"task_id": "...", "completion": "..."}
-SAMPLE_FILE_PATH: str = ""  # e.g. "Projects/MyProject/humaneval_samples.jsonl"
+SAMPLE_FILE_PATH: str = r"C:\Users\Omer Bassan\Desktop\הנדסת נתונים\שנה ד סמ א\פרויקט מסכם\Chameleon\Projects\TestRun1\distorted_data\samples.jsonl"
 
 # ====== OPTIONAL: HumanEval imports ======
 try:
@@ -188,13 +188,29 @@ def evaluate_functional_correctness(
         for sample in tqdm.tqdm(stream_jsonl(sample_file)):
             task_id = sample["task_id"]
             completion = sample["completion"]
-            args = (problems[task_id], completion, timeout, completion_id[task_id])
+
+            # Parse original task ID from distorted ID (e.g., HumanEval/0_d0_m0.0 -> HumanEval/0)
+            if "_d" in task_id:
+                original_task_id = task_id.split("_d")[0]
+            else:
+                original_task_id = task_id
+            
+            if original_task_id not in problems:
+                print(f"Warning: Problem {original_task_id} not found for sample {task_id}")
+                continue
+
+            # Create a proxy problem with the Distorted ID so results map back correctly
+            proxy_prob = problems[original_task_id].copy()
+            proxy_prob["task_id"] = task_id
+
+            args = (proxy_prob, completion, timeout, completion_id[task_id])
             future = executor.submit(check_correctness, *args)
             futures.append(future)
             completion_id[task_id] += 1
             n_samples += 1
 
-        assert len(completion_id) == len(problems), "Some problems are not attempted."
+        if len(completion_id) < len(problems):
+             print(f"Warning: Only {len(completion_id)} unique distorted tasks evaluated.")
 
         print("Running test suites...")
         for future in tqdm.tqdm(as_completed(futures), total=len(futures)):
@@ -204,7 +220,7 @@ def evaluate_functional_correctness(
     # Calculate pass@k.
     total, correct = [], []
     for result in results.values():
-        result.sort()  # sort by completion_id
+        result.sort(key=lambda x: x[0])  # sort by completion_id
         passed = [r[1]["passed"] for r in result]
         total.append(len(passed))
         correct.append(sum(passed))
