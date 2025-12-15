@@ -2,7 +2,7 @@
 Checkpoint Validators for Chameleon Pipeline
 
 Validates data integrity at each stage:
-1. CHECKPOINT_PRELIMINARY: After preliminary CSV creation
+1. CHECKPOINT_PRELIMINARY: After preliminary JSONL creation
 2. CHECKPOINT_DISTORTION: After distortion generation
 3. CHECKPOINT_PRE_EVAL: Before evaluation submission
 4. CHECKPOINT_POST_EVAL: After evaluation results
@@ -49,7 +49,7 @@ class CheckpointValidator:
     
     def validate_preliminary(self, df: pd.DataFrame) -> ValidationResult:
         """
-        CHECKPOINT 1: Validate preliminary CSV structure.
+        CHECKPOINT 1: Validate preliminary JSONL structure.
         
         Checks:
         - All required columns exist
@@ -66,7 +66,7 @@ class CheckpointValidator:
         # Required columns
         required_cols = [
             'composite_key', 'question_id', 'distortion_id', 'miu',
-            'question_text', 'distorted_question', 'answer', 'options_json'
+            'question_text', 'distorted_question', 'answer'
         ]
         
         # Check 1: Required columns
@@ -98,20 +98,9 @@ class CheckpointValidator:
                 else:
                     checks_passed += 1
         
-        # Check 4: options_json is valid JSON
-        if 'options_json' in df.columns:
-            invalid_json = 0
-            for idx, val in df['options_json'].items():
-                if pd.notna(val) and val:
-                    try:
-                        if isinstance(val, str):
-                            json.loads(val)
-                    except:
-                        invalid_json += 1
-            if invalid_json > 0:
-                warnings.append(f"{invalid_json} rows have invalid options_json")
-            details['invalid_json_count'] = invalid_json
-        
+        # Check 4: options_json check removed
+        # if 'options_json' in df.columns: ...
+                
         # Check 5: Row count formula
         unique_questions = df['question_id'].nunique()
         miu_values = df['miu'].unique()
@@ -234,24 +223,7 @@ class CheckpointValidator:
             else:
                 checks_passed += 1
         
-        # Check 2: options_json validity
-        invalid_options = 0
-        for idx, row in df.iterrows():
-            opts = row.get('options_json', '')
-            if pd.isna(opts) or not opts:
-                invalid_options += 1
-            else:
-                try:
-                    if isinstance(opts, str):
-                        parsed = json.loads(opts)
-                        if not isinstance(parsed, dict):
-                            invalid_options += 1
-                except:
-                    invalid_options += 1
-        
-        if invalid_options > 0:
-            warnings.append(f"{invalid_options} rows have invalid/missing options_json")
-        details['invalid_options'] = invalid_options
+        # Check 2: options_json check removed
         
         # Check 3: distorted_question filled
         empty = df['distorted_question'].isna().sum() + (df['distorted_question'] == '').sum()
@@ -363,15 +335,21 @@ def run_all_checkpoints(project_dir: Path, stage: str = "all") -> Dict[str, Vali
     validator = CheckpointValidator(project_dir)
     results = {}
     
-    csv_path = project_dir / "distorted_data" / "distortions_complete.csv"
-    if not csv_path.exists():
-        csv_path = project_dir / "distorted_data" / "distortions_in_progress.csv"
+    jsonl_path = project_dir / "distorted_data" / "distortions_complete.jsonl"
+    if not jsonl_path.exists():
+        jsonl_path = project_dir / "distorted_data" / "distortions_in_progress.jsonl"
     
-    if not csv_path.exists():
-        print(f"❌ No CSV found in {project_dir / 'distorted_data'}")
+    if not jsonl_path.exists():
+        # Fallback to check for CSV if JSONL doesn't exist (legacy support or mismatch)
+        csv_path = project_dir / "distorted_data" / "distortions_complete.csv"
+        if csv_path.exists():
+             print(f"⚠️ Found CSV but expected JSONL at {project_dir / 'distorted_data'}")
+             return results
+        
+        print(f"❌ No JSONL found in {project_dir / 'distorted_data'}")
         return results
     
-    df = pd.read_csv(csv_path, encoding='utf-8')
+    df = pd.read_json(jsonl_path, orient='records', lines=True)
     
     stages_to_run = {
         "preliminary": validator.validate_preliminary,

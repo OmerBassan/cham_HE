@@ -89,9 +89,12 @@ def setup_plot_style():
     })
 
 
-def load_results(csv_path: Path) -> pd.DataFrame:
-    """Load and clean results CSV."""
-    df = pd.read_csv(csv_path)
+def load_results(path: Path) -> pd.DataFrame:
+    """Load and clean results (supports CSV or JSONL)."""
+    if path.suffix == '.jsonl':
+        df = pd.read_json(path, orient='records', lines=True)
+    else:
+        df = pd.read_csv(path)
     
     # Ensure numeric miu
     df["miu"] = pd.to_numeric(df["miu"], errors="coerce").astype(float)
@@ -253,12 +256,12 @@ def classify_error(row: pd.Series) -> str:
     if any(sep in ans for sep in [",", "/", " and ", " or ", ";"]):
         return "multiple_options"
     
-    try:
-        options = json.loads(str(row.get("options_json", "{}")))
-        if isinstance(options, dict) and len(ans) == 1 and ans.upper() in options:
-            return "wrong_choice"
-    except:
-        pass
+    # try:
+    #     options = json.loads(str(row.get("options_json", "{}")))
+    #     if isinstance(options, dict) and len(ans) == 1 and ans.upper() in options:
+    #         return "wrong_choice"
+    # except:
+    #     pass
     
     return "invalid_format"
 

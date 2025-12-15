@@ -219,29 +219,29 @@ class DistortionRunner:
         data_dir = self.config.project_dir / "distorted_data"
         data_dir.mkdir(parents=True, exist_ok=True)
         
-        complete_path = data_dir / "distortions_complete.csv"
-        preliminary_path = data_dir / "preliminary_distortions.csv"
+        complete_path = data_dir / "distortions_complete.jsonl"
+        preliminary_path = data_dir / "preliminary_distortions.jsonl"
         
         # If complete exists, use it
         if complete_path.exists():
-            return pd.read_csv(complete_path, encoding='utf-8')
+            return pd.read_json(complete_path, orient='records', lines=True)
         
         # Otherwise, initialize from preliminary
         if preliminary_path.exists():
-            df = pd.read_csv(preliminary_path, encoding='utf-8')
-            df.to_csv(complete_path, index=False, encoding='utf-8')
+            df = pd.read_json(preliminary_path, orient='records', lines=True)
+            df.to_json(complete_path, orient='records', lines=True)
             return df
         
         # Neither exists - create from original data
-        print("   Creating preliminary distortions CSV from original data...")
-        df = self._create_preliminary_csv()
-        df.to_csv(complete_path, index=False, encoding='utf-8')
+        print("   Creating preliminary distortions JSONL from original data...")
+        df = self._create_preliminary_data()
+        df.to_json(complete_path, orient='records', lines=True)
         print(f"   ✓ Created {len(df)} rows for distortion")
         return df
     
-    def _create_preliminary_csv(self) -> pd.DataFrame:
+    def _create_preliminary_data(self) -> pd.DataFrame:
         """
-        Create the preliminary distortions CSV from original data files.
+        Create the preliminary distortions dataframe from original data files.
         
         For HumanEval-style datasets, each row corresponds to a single task,
         where 'question_text' contains the prompt (code stub + description/docstring)
@@ -369,13 +369,11 @@ class DistortionRunner:
             combined['question_id'] = question_ids
             combined['question_text'] = question_texts
             # For HumanEval we don't have MCQ options or a single "answer" letter
-            if 'options_json' not in combined.columns:
-                combined['options_json'] = '{}'
             if 'answer' not in combined.columns:
                 combined['answer'] = ''
         
         # At this point, `combined` has at least:
-        # subject, question_id, question_text, options_json, answer (for both paths)
+        # subject, question_id, question_text, answer (for both paths)
         
         # Ensure required columns exist with defaults if missing
         if 'subject' not in combined.columns:
@@ -388,8 +386,6 @@ class DistortionRunner:
                 combined['question_text'] = combined['text']
             else:
                 combined['question_text'] = ''
-        if 'options_json' not in combined.columns:
-            combined['options_json'] = '{}'
         if 'answer' not in combined.columns:
             combined['answer'] = ''
         
@@ -404,7 +400,6 @@ class DistortionRunner:
             q_id = row.get('question_id', f'Q_{idx:04d}')
             q_text = row.get('question_text', row.get('question', ''))
             answer = row.get('answer', '')
-            options = row.get('options_json', row.get('answer_options', '{}'))
             subject = row.get('subject', '')
             
             for miu in miu_values:
@@ -414,7 +409,6 @@ class DistortionRunner:
                         'subject': subject,
                         'question_id': q_id,
                         'question_text': q_text,
-                        'options_json': options,
                         'distorted_question': q_text,  # Same as original for miu=0
                         'distortion_id': f"{q_id}_d0_m0.0",  # Unique: question_id + distortion + miu
                         'miu': miu,
@@ -430,7 +424,6 @@ class DistortionRunner:
                             'subject': subject,
                             'question_id': q_id,
                             'question_text': q_text,
-                            'options_json': options,
                             'distorted_question': '',  # To be filled by distortion
                             'distortion_id': f"{q_id}_d{i}_m{miu}",  # Unique: question_id + distortion + miu
                             'miu': miu,
@@ -443,7 +436,7 @@ class DistortionRunner:
         # Create DataFrame with exact column order
         df = pd.DataFrame(preliminary_data)
         column_order = [
-            'subject', 'question_id', 'question_text', 'options_json',
+            'subject', 'question_id', 'question_text',
             'distorted_question', 'distortion_id', 'miu', 'answer',
             'target_model_name', 'target_model_answer', 'is_correct'
         ]
@@ -455,10 +448,10 @@ class DistortionRunner:
         return df
     
     def _save_data(self):
-        """Save current state directly to distortions_complete.csv."""
+        """Save current state directly to distortions_complete.jsonl."""
         with self._lock:
-            csv_path = self.config.project_dir / "distorted_data" / "distortions_complete.csv"
-            self._df.to_csv(csv_path, index=False, encoding='utf-8')
+            jsonl_path = self.config.project_dir / "distorted_data" / "distortions_complete.jsonl"
+            self._df.to_json(jsonl_path, orient='records', lines=True)
     
     def _cleanup(self):
         """Clean up temporary files after completion."""
@@ -476,7 +469,7 @@ class DistortionRunner:
             log_path.unlink()
         
         # Remove preliminary file (already incorporated into complete)
-        preliminary_path = data_dir / "preliminary_distortions.csv"
+        preliminary_path = data_dir / "preliminary_distortions.jsonl"
         if preliminary_path.exists():
             preliminary_path.unlink()
     

@@ -232,6 +232,8 @@ class BatchResult(BaseModel):
     failed: int
     records: List[EvaluationRecord]
     
+    model_config = {'protected_namespaces': ()}
+    
     def accuracy(self) -> float:
         """Calculate overall accuracy."""
         correct = sum(1 for r in self.records if r.is_correct)

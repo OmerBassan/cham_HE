@@ -31,7 +31,8 @@ from dotenv import load_dotenv
 # ====== CONFIGURABLE INPUT PATH ======
 # Set this to the path of your HumanEval-style samples JSONL file.
 # Each line should contain at least: {"task_id": "...", "completion": "..."}
-SAMPLE_FILE_PATH: str = r"C:\Users\Omer Bassan\Desktop\הנדסת נתונים\שנה ד סמ א\פרויקט מסכם\Chameleon\Projects\TestRun1\distorted_data\samples.jsonl"
+# If left empty, the code will dynamically determine the path based on the project configuration.
+SAMPLE_FILE_PATH: str = ""
 
 # ====== OPTIONAL: HumanEval imports ======
 try:
@@ -189,14 +190,34 @@ def evaluate_functional_correctness(
             task_id = sample["task_id"]
             completion = sample["completion"]
 
-            # Parse original task ID from distorted ID (e.g., HumanEval/0_d0_m0.0 -> HumanEval/0)
+            # Parse original task ID from distorted ID
             if "_d" in task_id:
-                original_task_id = task_id.split("_d")[0]
+                base_id = task_id.split("_d")[0]
             else:
-                original_task_id = task_id
+                base_id = task_id
             
-            if original_task_id not in problems:
-                print(f"Warning: Problem {original_task_id} not found for sample {task_id}")
+            # Normalize ID to match HumanEval format (HumanEval/0)
+            # Logic: Try exact match first, then try converting human-eval_0001 -> HumanEval/1
+            original_task_id = base_id
+            candidates = [base_id]
+            
+            if base_id.lower().startswith("human-eval_"):
+                try:
+                    # e.g. human-eval_0001 -> 1
+                    num_part = int(base_id.split("_")[-1])
+                    candidates.append(f"HumanEval/{num_part}")
+                except (ValueError, IndexError):
+                    pass
+            
+            found = False
+            for candidate in candidates:
+                if candidate in problems:
+                    original_task_id = candidate
+                    found = True
+                    break
+            
+            if not found:
+                print(f"Warning: Problem {base_id} (tried {candidates}) not found for sample {task_id}")
                 continue
 
             # Create a proxy problem with the Distorted ID so results map back correctly
@@ -238,9 +259,13 @@ def evaluate_functional_correctness(
     def combine_results():
         for sample in stream_jsonl(sample_file):
             task_id = sample["task_id"]
-            res = results[task_id].pop(0)
-            sample["result"] = res[1]["result"]
-            sample["passed"] = res[1]["passed"]
+            if results[task_id]:
+                res = results[task_id].pop(0)
+                sample["result"] = res[1]["result"]
+                sample["passed"] = res[1]["passed"]
+            else:
+                sample["result"] = "skipped"
+                sample["passed"] = False
             yield sample
 
     out_file = sample_file + "_results.jsonl"

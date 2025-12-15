@@ -79,28 +79,36 @@ DISTORTION_SYSTEM_PROMPT = """You are a semantic distortion expert for programmi
 Your task is to create lexically distorted versions of HumanEval-style coding problem descriptions 
 while preserving the required function behavior and all reference tests.
 
-HumanEval prompts always follow this structure:
-- Optional Python import lines at the top
-- A SINGLE function definition line: "def <name>(...)->...:"
-- A triple-quoted docstring block (\"\"\" ... \"\"\") indented under the function
+DATA SOURCE ARCHITECTURE:
+You are processing a JSON-Lines (JSONL) row with the following fields:
+- "task_id": Unique identifier (e.g., "HumanEval/20")
+- "prompt": The problem stem. This contains:
+    1. Python imports (optional)
+    2. A SINGLE function definition line: "def <name>(...)->...:"
+    3. A triple-quoted docstring block (\"\"\" ... \"\"\") indented under the function.
+    **THIS IS THE ONLY FIELD YOU TARGET.** You must output a modified version of this "prompt" field.
+- "entry_point": The function name to call (e.g., "find_closest_elements"). DO NOT TOUCH.
+- "canonical_solution": The reference implementation. DO NOT TOUCH.
+- "test": The unit test assertions. DO NOT TOUCH.
 
 CRITICAL RULES:
-- Operate ONLY on natural-language text (descriptions, docstrings, comments)
-- The overall Python template (imports + function definition line + triple-quoted docstring) 
-  MUST be preserved EXACTLY: same imports, same def line, same docstring delimiters and indentation
-- Inside the docstring, you may only rewrite the natural-language explanation sentences
-- Within the docstring, NEVER modify lines that start with ">>>" or the example output lines that follow them
-- If the input contains Python code (function signatures, type hints, asserts, examples),
-  you MUST copy that code EXACTLY, character for character
-- NEVER change function names, argument names, return types, or literal values in code or examples
-- NEVER introduce new requirements, remove existing ones, or change I/O behavior
-- Use ONLY synonyms, paraphrasing, and sentence restructuring in the description
-- NEVER add random characters or symbols
-- NEVER use markdown formatting (no **, ##, or ``` )
-- NEVER start with preambles like "Here are..." or "Sure, here..."
-- Each distortion must be grammatically correct and semantically equivalent
-- The underlying tests and reference solution must remain valid after distortion
-- Output exactly the requested number of distortions"""
+1. TARGET SCOPE:
+   - You are ONLY rewriting the natural-language description inside the triple-quoted docstring within the "prompt" field.
+
+2. PRESERVATION (STRICT):
+   - **Function Signature**: The `def function_name(...):` line MUST remain EXACTLY the same.
+   - **Structure**: Imports, definition line, indentation, and docstring delimiters must happen EXACTLY as in the original.
+   - **Examples**: Inside the docstring, NEVER modify lines starting with `>>>` or their corresponding output lines.
+   - **Code**: NEVER modify any Python code, variable names, or logic.
+
+3. DISTORTION (Natural Language Only):
+   - Rewrite the explanation text inside the docstring.
+   - Use synonyms, sentence restructuring, and paraphrasing.
+   - NEVER start with preambles like "Here are...".
+   - NEVER use markdown formatting (no **, ##, or ``` ).
+   - Output exactly the requested number of distortions.
+
+Your goal is to produce a valid replacement for the "prompt" field that tests if a model can still solve the problem when the description is phrased differently."""
 
 
 def get_distortion_prompt(question: str, miu: float, n_distortions: int) -> str:

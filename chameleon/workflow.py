@@ -118,7 +118,7 @@ class ChameleonWorkflow:
         for d in [self.distorted_data_dir, self.results_dir, self.analysis_dir]:
             d.mkdir(parents=True, exist_ok=True)
             
-        self.distorted_csv = self.distorted_data_dir / "distortions_complete.csv"
+        self.distorted_jsonl = self.distorted_data_dir / "distortions_complete.jsonl"
         self.samples_jsonl = self.distorted_data_dir / "samples.jsonl"
     
     def run(self) -> Dict[str, Any]:
@@ -213,14 +213,14 @@ class ChameleonWorkflow:
         Generate answers from the target model for every distorted question.
         Saves result to samples.jsonl for evaluation.
         """
-        if not self.distorted_csv.exists():
-            raise FileNotFoundError(f"Distortions file not found: {self.distorted_csv}. Run distortion stage first.")
+        if not self.distorted_jsonl.exists():
+            raise FileNotFoundError(f"Distortions file not found: {self.distorted_jsonl}. Run distortion stage first.")
         
         if not self.config.target_api_key and self.config.target_vendor != "dummy":
             print(f"⚠️ Target API key for {self.config.target_vendor} not found. Ensure it is set in .env.")
         
         # Load distortions
-        df = pd.read_csv(self.distorted_csv, encoding='utf-8')
+        df = pd.read_json(self.distorted_jsonl, orient='records', lines=True)
         print(f"Loaded {len(df)} distortion rows.")
         
         # Prepare backend
@@ -386,12 +386,12 @@ class ChameleonWorkflow:
                 except:
                     pass
         
-        # Join with metadata from distortions csv
-        if not self.distorted_csv.exists():
-            print("Distortions CSV missing, cannot correlate metadata.")
+        # Join with metadata from distortions jsonl
+        if not self.distorted_jsonl.exists():
+            print("Distortions JSONL missing, cannot correlate metadata.")
             return {"status": "missing_metadata"}
             
-        df = pd.read_csv(self.distorted_csv, encoding='utf-8')
+        df = pd.read_json(self.distorted_jsonl, orient='records', lines=True)
         
         # Add is_correct column
         df['is_correct'] = df['distortion_id'].map(results_map)

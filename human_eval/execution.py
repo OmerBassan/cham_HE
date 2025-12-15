@@ -93,6 +93,14 @@ def check_correctness(
 
 @contextlib.contextmanager
 def time_limit(seconds: float):
+    # Windows doesn't support signal.setitimer (it raises AttributeError)
+    if not hasattr(signal, "setitimer"):
+        # On Windows, we simply yield without a timeout limit for now.
+        # A robust solution would use a separate process watchdog, but for this
+        # project's local execution, skipping the hard timeout is acceptable.
+        yield
+        return
+
     def signal_handler(signum, frame):
         raise TimeoutException("Timed out!")
 
