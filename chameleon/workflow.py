@@ -99,6 +99,9 @@ class WorkflowConfig:
         # Benchmark config (new section; falls back to sensible defaults)
         benchmark_cfg = cfg.get("benchmark", {})
         benchmark_type = benchmark_cfg.get("type", cfg.get("benchmark_type", "human_eval"))
+        # Self-contained benchmarks (e.g. VQAv2) need the project dir to resolve
+        # their .env and distortion engine, mirroring run_vqav2_pipeline's project_path.
+        benchmark_cfg.setdefault("project_path", str(project_dir))
 
         return cls(
             project_name=project_name,
@@ -151,7 +154,15 @@ class ChameleonWorkflow:
         print("=" * 70)
         print("🦎 CHAMELEON WORKFLOW (HumanEval Edition)")
         print("=" * 70)
-        
+
+        # Self-contained benchmarks (e.g. VQAv2) ship their own end-to-end
+        # pipeline that handles modalities the generic text stages cannot
+        # (images, provider-specific vision calls). Delegate the whole run to
+        # them and skip the four generic stages.  Opt-in via runs_own_pipeline
+        # so text benchmarks like HumanEval keep using the generic stages.
+        if getattr(self.benchmark, "runs_own_pipeline", False):
+            return self._run_self_contained(results, start_time)
+
         try:
             # Stage 1: Distort
             if not self.config.skip_distortion and self.benchmark.supports_stage("distort"):
@@ -215,6 +226,67 @@ class ChameleonWorkflow:
         
         return results
     
+    def _run_self_contained(self, results: Dict[str, Any], start_time: float) -> Dict[str, Any]:
+        """
+        Delegate the entire run to a benchmark that owns its own pipeline.
+
+        Used by multimodal benchmarks (e.g. VQAv2) whose generation needs images
+        and provider-specific vision calls that the generic text stages can't do.
+        All model/distortion knobs are read by the benchmark from its config
+        (the `benchmark:` block); here we only supply data_path, output_dir, the
+        single μ level, and an optional row limit.
+        """
+        bcfg = self.config.benchmark_config or {}
+
+        data_path = bcfg.get("data_path", "")
+        if not data_path:
+            raise ValueError(
+                "benchmark.data_path is required to run a self-contained "
+                f"benchmark ('{self.config.benchmark_type}'). Add it to config.yaml."
+            )
+        resolved = Path(data_path)
+        if not resolved.is_absolute():
+            resolved = Path(__file__).parent.parent / data_path
+        if not resolved.exists():
+            raise FileNotFoundError(f"Benchmark data not found: {resolved}")
+
+        miu = float(bcfg.get("miu", 0.6))
+        limit = bcfg.get("limit")
+
+        print(f"\n🧩 Delegating to {type(self.benchmark).__name__}.run_full_pipeline()")
+        print(f"   Data:   {resolved}")
+        print(f"   Output: {self.results_dir}")
+        print(f"   μ:      {miu}" + (f"   Limit: {limit}" if limit else ""))
+
+        try:
+            summary = self.benchmark.run_full_pipeline(
+                str(resolved),
+                str(self.results_dir),
+                miu=miu,
+                limit=limit,
+            )
+            results["stages"]["pipeline"] = summary
+            results["status"] = "success"
+        except Exception as e:
+            print(f"\n❌ Workflow failed: {e}")
+            results["status"] = "failed"
+            results["error"] = str(e)
+            import traceback
+            traceback.print_exc()
+
+        elapsed = time.time() - start_time
+        results["elapsed_seconds"] = elapsed
+        results["end_time"] = datetime.now().isoformat()
+
+        print("\n" + "=" * 70)
+        print("🏁 WORKFLOW COMPLETE")
+        print("=" * 70)
+        print(f"Status: {results['status']}")
+        print(f"Time: {elapsed/60:.1f} minutes")
+        print("=" * 70)
+
+        return results
+
     def _stage_distort(self) -> Dict[str, Any]:
         """Run distortion runner."""
         if not self.config.distortion_api_key:

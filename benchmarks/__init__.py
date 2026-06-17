@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
 BENCHMARK_REGISTRY: dict = {
     "human_eval": "benchmarks.human_eval.human_eval.HumanEvalBenchmark",
+    "vqav2": "benchmarks.vqav2.vqav2.VQAV2Benchmark",
     # "mmlu": "benchmarks.mmlu.mmlu.MMLUBenchmark",
     # "gsm8k": "benchmarks.gsm8k.gsm8k.GSM8KBenchmark",
 }

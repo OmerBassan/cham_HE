@@ -96,25 +96,62 @@ class BaseDistortionEngine(ABC):
 
     def _extract_single_distortion(self, raw_output: str) -> str:
         """
-        Extract a single distorted prompt from the model output.
+        Robustly extract a single distorted question from LLM output.
 
-        The distortion prompts typically ask the model to return a numbered list
-        (e.g. "1. ...", "2. ..."). For HumanEval-style usage we usually request
-        exactly one distortion, so we:
-        - Take the first non-empty line.
-        - Strip common list markers like "1.", "1)", "- ", "* ".
+        Tries the following strategies in order of confidence:
+          0. ``DISTORTED: <question>`` tag — the explicit format the prompt requests.
+          1. Numbered list item  (``1. ...`` / ``1) ...``) — skips all preamble.
+          2. Quoted question     (``"...?"`` inline) — LLM wrapped with quotes.
+          3. Any line ending with ``?`` after stripping markdown noise.
+          4. Any line starting with a quote character — partial wrap.
+          5. First non-empty line after stripping list markers — last resort.
         """
         if not raw_output:
-            return raw_output
+            return ""
 
         lines = [line.strip() for line in raw_output.splitlines() if line.strip()]
         if not lines:
-            return raw_output.strip()
+            return ""
 
+        def _clean(s: str) -> str:
+            """Strip surrounding quotes, markdown bold/italic markers."""
+            s = re.sub(r'^["\'\u201c\u201d`]+|["\'\u201c\u201d`]+$', '', s)
+            s = re.sub(r'^\*{1,3}|\*{1,3}$', '', s)
+            return s.strip()
+
+        # ── Priority 0: explicit DISTORTED: tag ─────────────────────────────
+        tag_match = re.search(r'(?i)DISTORTED:\s*(.+)', raw_output)
+        if tag_match:
+            return _clean(tag_match.group(1))
+
+        # ── Priority 1: numbered list item ──────────────────────────────────
+        for line in lines:
+            m = re.match(r'^\s*\d+[\.\)]\s+(.+)', line)
+            if m:
+                return _clean(m.group(1))
+
+        # ── Priority 2: quoted question (inline) ────────────────────────────
+        for line in lines:
+            m = re.search(r'["\u201c\u201d]([^"\u201c\u201d]*?\?)["\u201c\u201d]', line)
+            if m:
+                return _clean(m.group(1))
+
+        # ── Priority 3: any line ending with '?' (after cleaning) ───────────
+        for line in lines:
+            cleaned = _clean(line)
+            cleaned = re.sub(r'^\s*[-*]\s+', '', cleaned)
+            if cleaned.endswith('?'):
+                return cleaned
+
+        # ── Priority 4: line starting with a quote character ────────────────
+        for line in lines:
+            if line and line[0] in ('"', "'", '\u201c', '\u201d', '`'):
+                return _clean(line)
+
+        # ── Priority 5: first non-empty line (last resort) ──────────────────
         first = lines[0]
-        # Remove common leading list markers: "1.", "1)", "- ", "* ", etc.
-        first = re.sub(r"^\s*(?:\d+[\.\)]\s*|[-*]\s+)", "", first)
-        return first.strip()
+        first = re.sub(r'^\s*(?:\d+[\.\)]|[-*])\s+', '', first)
+        return _clean(first)
 
     def distort_question(
         self,
@@ -172,8 +209,7 @@ class BaseDistortionEngine(ABC):
             latency_ms = (time.time() - start_time) * 1000.0
 
             # Clean up the response and extract the single distortion line
-            
-            
+            distorted = self._extract_single_distortion(distorted)
 
             return DistortionResult(
                 question_id=question_id,
@@ -186,7 +222,11 @@ class BaseDistortionEngine(ABC):
             )
 
         except Exception as e:
-            # Preserve legacy behavior: fall back to original question on failure
+            # Do NOT swallow rate limit errors; let the benchmark's retry logic handle them.
+            if "429" in str(e) or "rate_limit" in str(e).lower():
+                raise
+
+            # Preserve legacy behavior: fall back to original question on other failures
             return DistortionResult(
                 question_id=question_id,
                 original_question=question,

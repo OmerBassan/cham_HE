@@ -42,6 +42,12 @@ class AbstractBenchmark(ABC):
         supports_stage        — whether this benchmark participates in a stage
     """
 
+    # Opt-in flag: when True, ChameleonWorkflow delegates the entire run to the
+    # benchmark's own run_full_pipeline() instead of the generic distort/generate/
+    # evaluate/analyze stages. Set this on benchmarks whose pipeline the generic
+    # text stages can't drive (e.g. multimodal VQAv2, which needs images).
+    runs_own_pipeline: bool = False
+
     def __init__(self, config: Dict[str, Any]):
         self.config = config
 
